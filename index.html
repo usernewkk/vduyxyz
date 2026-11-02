@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lấy key</title>
+<style>
+  :root{--bg:#eef3f1;--card:#fff;--ink:#16302b;--muted:#5d7570;--line:#cfdcd8;--accent:#0f766e;--accent-ink:#fff;--err:#b42318}
+  @media (prefers-color-scheme: dark){:root{--bg:#0f1b19;--card:#162624;--ink:#e6f1ee;--muted:#93aca6;--line:#2b4540;--accent:#2dd4bf;--accent-ink:#06211d;--err:#ff8a7a}}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:var(--bg);color:var(--ink);font-family:"Segoe UI",system-ui,sans-serif}
+  main{width:100%;max-width:460px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px}
+  h1{margin:0 0 6px;font-size:1.5rem}
+  p{color:var(--muted);margin:0 0 20px;font-size:.95rem}
+  button{font:inherit;cursor:pointer}
+  button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  #get{width:100%;padding:12px;font-weight:600;background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px}
+  #get:disabled{opacity:.6;cursor:wait}
+  .out{display:none;gap:8px}
+  .out.show{display:flex}
+  .out input{flex:1;padding:11px 12px;font:inherit;font-weight:600;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px}
+  .out button{padding:0 16px;color:var(--ink);background:transparent;border:1px solid var(--line);border-radius:8px}
+  #msg{margin:12px 0 0;font-size:.9rem;color:var(--err);min-height:1.2em}
+  #msg.ok{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Lấy key</h1>
+  <p id="sub">Bấm Get key, hoàn thành link vượt rồi quay lại trang này để nhận key.</p>
+  <button id="get">Get key</button>
+  <div class="out" id="out">
+    <input id="key" readonly aria-label="Key của bạn">
+    <button id="copy" type="button">Sao chép</button>
+  </div>
+  <p id="msg"></p>
+</main>
+<script>
+  var $ = function(id){ return document.getElementById(id); };
+  var errors = {
+    fast: "Bạn quay lại quá nhanh. Hãy hoàn thành link vượt rồi thử lại.",
+    expired: "Phiên đã hết hạn. Bấm Get key để tạo lại."
+  };
+
+  async function load(){
+    var e = new URLSearchParams(location.search).get("e");
+    if (e && errors[e]) $("msg").textContent = errors[e];
+    try {
+      var d = await (await fetch("/api/key")).json();
+      if (d.key){
+        $("get").style.display = "none";
+        $("key").value = d.key;
+        $("out").classList.add("show");
+        $("sub").textContent = "Key của bạn có hiệu lực 24 giờ.";
+        $("msg").textContent = "";
+      }
+    } catch (err) {}
+  }
+
+  $("get").addEventListener("click", async function(){
+    var b = $("get");
+    b.disabled = true; b.textContent = "Đang tạo link...";
+    $("msg").className = ""; $("msg").textContent = "";
+    try {
+      var r = await fetch("/api/start", { method: "POST" });
+      var raw = await r.text(), d;
+      try { d = JSON.parse(raw); }
+      catch (e) { throw new Error("Không kết nối được server key (nhận về HTML thay vì JSON). Hãy chạy server.js bằng Node và mở trang qua địa chỉ của server, không mở file index.html trực tiếp."); }
+      if (!r.ok) throw new Error(d.error || "Có lỗi xảy ra.");
+      $("msg").className = "ok"; $("msg").textContent = "Đang chuyển sang link vượt...";
+      location.href = d.shortUrl;
+    } catch (err) {
+      $("msg").textContent = err.message;
+      b.disabled = false; b.textContent = "Get key";
+    }
+  });
+
+  $("copy").addEventListener("click", async function(){
+    try { await navigator.clipboard.writeText($("key").value); }
+    catch (e) { $("key").select(); document.execCommand("copy"); }
+    $("copy").textContent = "Đã chép";
+    setTimeout(function(){ $("copy").textContent = "Sao chép"; }, 1500);
+  });
+
+  load();
+</script>
+</body>
+</html>
