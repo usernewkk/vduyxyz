@@ -79,22 +79,44 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // 2) Người dùng vượt link xong và quay về đây
+  // 2) Người dùng vượt link xong và quay về đây.
+  //    Chỉ chấp nhận đúng trình duyệt đã bấm Get key (có cookie sid), rồi xác nhận bằng JS để loại bot/máy quét.
   if (url.pathname === "/return") {
-    const sid = byNonce.get(url.searchParams.get("r") || "");
+    const nonce = url.searchParams.get("r") || "";
+    const sid = byNonce.get(nonce);
     const s = sid && sessions.get(sid);
-    const age = s ? Date.now() - s.created : 0;
-    if (!s || age > SESSION_TTL) { res.writeHead(302, { Location: "/?e=expired" }); return res.end(); }
-    if (age < MIN_SECONDS * 1000) { res.writeHead(302, { Location: "/?e=fast" }); return res.end(); }
-    if (!s.verified) {
-      s.verified = true;
-      s.key = "KEY-" + rand(8).toUpperCase();
-      keys.set(s.key, Date.now() + KEY_TTL);
+    if (!s || Date.now() - s.created > SESSION_TTL) { res.writeHead(302, { Location: "/?e=expired" }); return res.end(); }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    if (cookies(req).sid !== sid) {
+      return res.end('<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:sans-serif;padding:24px"><p>Hãy mở link này trong <b>cùng trình duyệt</b> đã bấm Get key (không dùng trình duyệt trong ứng dụng khác), rồi thử lại.</p><p><a href="/">Về trang chủ</a></p>');
     }
-    byNonce.delete(s.nonce);
-    setSid(res, sid);
-    res.writeHead(302, { Location: "/" });
-    return res.end();
+    return res.end('<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:sans-serif;padding:24px"><p id="m">Đang xác nhận...</p><noscript>Cần bật JavaScript.</noscript><script>' +
+      'fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({r:' + JSON.stringify(nonce) + '})})' +
+      '.then(function(r){return r.json()}).then(function(d){location.replace(d.ok?"/":"/?e="+d.e)})' +
+      '.catch(function(){document.getElementById("m").textContent="Lỗi kết nối, hãy tải lại trang."})</script>');
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/confirm") {
+    let body = "";
+    req.on("data", (c) => { body += c; if (body.length > 1000) req.destroy(); });
+    req.on("end", () => {
+      let nonce = "";
+      try { nonce = String(JSON.parse(body).r || ""); } catch (e) {}
+      const sid = byNonce.get(nonce);
+      const s = sid && sessions.get(sid);
+      if (!s || cookies(req).sid !== sid) return json(res, 200, { ok: false, e: "expired" });
+      const age = Date.now() - s.created;
+      if (age > SESSION_TTL) return json(res, 200, { ok: false, e: "expired" });
+      if (age < MIN_SECONDS * 1000) return json(res, 200, { ok: false, e: "fast" });
+      if (!s.verified) {
+        s.verified = true;
+        s.key = "KEY-" + rand(8).toUpperCase();
+        keys.set(s.key, Date.now() + KEY_TTL);
+      }
+      byNonce.delete(s.nonce);
+      return json(res, 200, { ok: true });
+    });
+    return;
   }
 
   // 3) Trang chủ hỏi xem đã có key chưa
